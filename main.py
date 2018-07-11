@@ -49,7 +49,7 @@ if args.visualise is not None:
     tl_corner, br_corner = face_processor.find_corners(mean_face)
     canvas = np.zeros([br_corner[1], br_corner[0], 3]).astype(np.uint8)
 
-    face_processor.draw_points(canvas, mean_face, tag=False, in_place=True)
+    face_processor.draw_points(canvas, mean_face, tag=True, in_place=True)
     viewer = ImageViewer(canvas)
     viewer.show()
     exit(0)
@@ -57,8 +57,13 @@ if args.visualise is not None:
 if args.mean is not None:
     mean_face = args.scale * np.load(args.mean)
 
+height_border = 0
+width_border = 0
+
 if args.offset is not None:
     mean_face = face_processor.offset_mean_face(mean_face, offset_percentage=args.offset[:2])
+    height_border += args.offset[1] + args.offset[2]
+    width_border += 2 * args.offset[0]
 
 if args.reference is not None:
     reference = skimage.io.imread(args.reference)
@@ -66,8 +71,8 @@ if args.reference is not None:
     crop_width = reference.shape[1]
 else:
     face_width, face_height = face_processor.get_width_height(mean_face)
-    crop_height = int(face_height * (1 + args.offset[1] + args.offset[2]))
-    crop_width = int(face_width * (1 + 2 * args.offset[0]))
+    crop_height = int(face_height * (1 + height_border))
+    crop_width = int(face_width * (1 + width_border))
 
 print("Size will be W: " + str(crop_width) + " H: " + str(crop_height))
 
@@ -117,6 +122,9 @@ for i, file in enumerate(files):
         continue
 
     cropped_video = new_video[:, :crop_height, :crop_width, :]
-    skvideo.io.vwrite(out_files[i], cropped_video)
+    vid_out = skvideo.io.FFmpegWriter(out_files[i], inputdict={'-r': rate, }, outputdict={'-r': rate, })
+    for frame_no in range(cropped_video.shape[0]):
+        vid_out.writeFrame(cropped_video[frame_no])
+    vid_out.close()
 
 bar.finish()

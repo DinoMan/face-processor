@@ -5,7 +5,7 @@ import cv2
 import csv
 from skimage import transform as tf
 
-stablePntsIDs = [33, 36, 39, 42, 49]
+stablePntsIDs = [33, 36, 39, 42, 45]
 
 
 class face_processor():
@@ -44,14 +44,13 @@ class face_processor():
 
         trans = None
         for frame_no in range(0, video.shape[0]):
-            if frame_no + int(window_size / 2) < video.shape[0]:
+            if frame_no + window_size // 2 < video.shape[0]:
                 avg_stable_points = np.zeros([len(stablePntsIDs), 2])
 
                 for i in range(-int(window_size / 2), int(window_size / 2) + 1, 1):
                     avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
 
                 avg_stable_points /= window_size
-
                 video[frame_no], trans = self.warp_img(avg_stable_points,
                                                        self.mean_face[stablePntsIDs, :],
                                                        video[frame_no])
@@ -121,8 +120,8 @@ class face_processor():
             for frame_no, landmarks in enumerate(csvreader):
                 frame_landmarks = np.zeros([68, 2])
                 for point in range(1, len(landmarks), 2):
-                    frame_landmarks[point / 2, 0] = int(landmarks[point + 1])
-                    frame_landmarks[point / 2, 1] = int(landmarks[point])
+                    frame_landmarks[point // 2, 0] = int(landmarks[point + 1])
+                    frame_landmarks[point // 2, 1] = int(landmarks[point])
 
                     if int(landmarks[point]) == -1:
                         return []
@@ -152,7 +151,7 @@ class face_processor():
             if number_of_faces == 1000:
                 break
 
-        mean_face = np.multiply(1 / float(number_of_faces), mean_landmarks)
+        mean_face = np.multiply(1 / number_of_faces, mean_landmarks)
 
         self.mean_face = self.offset_mean_face(mean_face, offset_percentage)
 
