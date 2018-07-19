@@ -6,6 +6,33 @@ from skimage.viewer import ImageViewer
 import progressbar
 import skvideo.io
 import skimage.io
+import multiprocessing as mp
+
+
+def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, window_size):
+    #Worker loop
+    while True:
+        task = queue.get()
+        if task is not None:
+            new_video = fp.normalise_face(files[task], landmarks[task], window_size=window_size)
+            if new_video is None:
+                continue
+
+            cropped_video = new_video[:, :crop_height, :crop_width, :]
+            vid_out = skvideo.io.FFmpegWriter(out_files[task], inputdict={'-r': rate, }, outputdict={'-r': rate, })
+            for frame_no in range(cropped_video.shape[0]):
+                vid_out.writeFrame(cropped_video[frame_no])
+            vid_out.close()
+
+            queue.task_done()
+        else:
+            break
+
+        # Only the first worker updates the progress
+        if worker_no == 0:
+            bar.update(task)
+
+    queue.task_done()
 
 
 def swap_extension(file, ext):
@@ -29,11 +56,16 @@ parser.add_argument("--ext_video", help="the file extension for the video")
 parser.add_argument("--append_extension", "-a", help="path to append after subject")
 parser.add_argument("--picture", "-p", action='store_true', help="processes images", default=False)
 parser.add_argument("--reference", "-r", help="reference image")
+parser.add_argument("--workers", help="number of workers to use")
 
 args = parser.parse_args()
 
 mean_face = None
 reference = None
+
+no_workers = mp.cpu_count()
+if args.workers is not None:
+    no_workers = min(args.workers, mp.cpu_count())
 
 if args.append_extension is None:
     extension = "/"
@@ -98,6 +130,9 @@ else:
 files = []
 landmarks = []
 out_files = []
+
+queue = mp.JoinableQueue()
+progress = 0
 for subject_folder in subject_folder_list:
     if not os.path.exists(args.output + "/" + subject_folder):
         os.makedirs(args.output + "/" + subject_folder)
@@ -107,24 +142,22 @@ for subject_folder in subject_folder_list:
         files.append(args.input + "/" + subject_folder + extension + video_file)
         landmarks.append(args.landmarks + "/" + subject_folder + extension + swap_extension(video_file, ".csv"))
         out_files.append(args.output + "/" + subject_folder + "/" + video_file)
+        queue.put(progress)
+        progress += 1
 
 if args.calculate_mean:
     mean_face = fp.find_mean_face(files)
     np.save("mean_face.npy", mean_face)
 
 bar = progressbar.ProgressBar(max_value=len(files)).start()
-
 rate = face_processor.get_frame_rate(files[0])
-for i, file in enumerate(files):
-    new_video = fp.normalise_face(file, landmarks[i], window_size=args.smoothing_window)
-    bar.update(i + 1)
-    if new_video is None:
-        continue
 
-    cropped_video = new_video[:, :crop_height, :crop_width, :]
-    vid_out = skvideo.io.FFmpegWriter(out_files[i], inputdict={'-r': rate, }, outputdict={'-r': rate, })
-    for frame_no in range(cropped_video.shape[0]):
-        vid_out.writeFrame(cropped_video[frame_no])
-    vid_out.close()
+workers = []
+for i in range(no_workers):
+    queue.put(None) #Place the poison pills for the workers
+
+for i in range(no_workers):
+    workers.append(mp.Process(target=process_video,
+                              args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
 
 bar.finish()
