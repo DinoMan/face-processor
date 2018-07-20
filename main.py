@@ -160,4 +160,8 @@ for i in range(no_workers):
     workers.append(mp.Process(target=process_video,
                               args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
 
+for worker in workers:
+    worker.start()
+
+queue.join()
 bar.finish()
