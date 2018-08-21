@@ -13,7 +13,8 @@ class face_processor():
         self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, enable_cuda=cuda, flip_input=False)
 
         if ref_img is not None:
-            self.mean_face = self.fa.get_landmarks(ref_img)[0]
+            tmp_fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, enable_cuda=False, flip_input=False)
+            self.mean_face = tmp_fa.get_landmarks(ref_img)[0]
         else:
             if isinstance(mean_face, str):
                 self.mean_face = np.load(mean_face)
@@ -31,29 +32,33 @@ class face_processor():
                                           image)
         return warped_img
 
-    def normalise_face(self, video_file, landmarks_file, window_size=7):
+    def normalise_face(self, video_file, landmarks_file=None, window_size=7):
 
         if window_size % 2 == 0:
             window_size += 1
 
         video = skvideo.io.vread(video_file)
-        landmarks = self.parse_landmarks_file(landmarks_file)
+        if landmarks_file is not None:
+            landmarks = self.parse_landmarks_file(landmarks_file)
 
-        if not landmarks:
+        if video.shape[0] < window_size or len(landmarks) == 0:
             return None
 
         trans = None
         for frame_no in range(0, video.shape[0]):
-            if frame_no + window_size // 2 < video.shape[0]:
+            if frame_no + window_size < video.shape[0]:
                 avg_stable_points = np.zeros([len(stablePntsIDs), 2])
-
-                for i in range(-int(window_size / 2), int(window_size / 2) + 1, 1):
-                    avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
+                for i in range(0, window_size):
+                    if landmarks_file is None:
+                        avg_stable_points += self.fa.get_landmarks(video[frame_no + i])[0][stablePntsIDs, :]
+                    else:
+                        avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
 
                 avg_stable_points /= window_size
                 video[frame_no], trans = self.warp_img(avg_stable_points,
                                                        self.mean_face[stablePntsIDs, :],
                                                        video[frame_no])
+
             else:
                 video[frame_no] = self.apply_transform(trans, video[frame_no])
 

@@ -10,12 +10,14 @@ import multiprocessing as mp
 
 
 def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, window_size):
-    #Worker loop
+    # Worker loop
     while True:
         task = queue.get()
         if task is not None:
             new_video = fp.normalise_face(files[task], landmarks[task], window_size=window_size)
+
             if new_video is None:
+                queue.task_done()
                 continue
 
             cropped_video = new_video[:, :crop_height, :crop_width, :]
@@ -56,7 +58,7 @@ parser.add_argument("--ext_video", help="the file extension for the video")
 parser.add_argument("--append_extension", "-a", help="path to append after subject")
 parser.add_argument("--picture", "-p", action='store_true', help="processes images", default=False)
 parser.add_argument("--reference", "-r", help="reference image")
-parser.add_argument("--workers", help="number of workers to use")
+parser.add_argument("--workers", type=int, help="number of workers to use")
 
 args = parser.parse_args()
 
@@ -108,7 +110,7 @@ else:
 
 print("Size will be W: " + str(crop_width) + " H: " + str(crop_height))
 
-fp = face_processor(cuda=args.gpu, mean_face=mean_face, ref_img=reference)
+fp = face_processor(cuda=args.gpu, mean_face=mean_face, ref_img=args.reference)
 
 if args.picture:
     pictures = os.listdir(args.input)
@@ -128,8 +130,8 @@ else:
     subject_folder_list = [str(s) for s in args.subjects]
 
 files = []
-landmarks = []
 out_files = []
+landmarks = []
 
 queue = mp.JoinableQueue()
 progress = 0
@@ -139,8 +141,13 @@ for subject_folder in subject_folder_list:
     for video_file in os.listdir(args.input + "/" + subject_folder + extension):
         if args.ext_video is not None and not video_file.endswith(args.ext_video):
             continue
+
         files.append(args.input + "/" + subject_folder + extension + video_file)
-        landmarks.append(args.landmarks + "/" + subject_folder + extension + swap_extension(video_file, ".csv"))
+        if args.landmarks is None:
+            landmarks.append(None)
+        else:
+            landmarks.append(args.landmarks + "/" + subject_folder + extension + swap_extension(video_file, ".csv"))
+
         out_files.append(args.output + "/" + subject_folder + "/" + video_file)
         queue.put(progress)
         progress += 1
@@ -152,16 +159,20 @@ if args.calculate_mean:
 bar = progressbar.ProgressBar(max_value=len(files)).start()
 rate = face_processor.get_frame_rate(files[0])
 
-workers = []
-for i in range(no_workers):
-    queue.put(None) #Place the poison pills for the workers
+if no_workers == 1:
+    process_video(0, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window)
+else:
+    workers = []
+    for i in range(no_workers):
+        queue.put(None)  # Place the poison pills for the workers
 
-for i in range(no_workers):
-    workers.append(mp.Process(target=process_video,
-                              args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
+    for i in range(no_workers):
+        workers.append(mp.Process(target=process_video,
+                                  args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
 
-for worker in workers:
-    worker.start()
+    for worker in workers:
+        worker.start()
 
-queue.join()
+    queue.join()
+
 bar.finish()
