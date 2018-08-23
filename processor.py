@@ -32,24 +32,34 @@ class face_processor():
                                           image)
         return warped_img
 
-    def normalise_face(self, video_file, landmarks_file=None, window_size=7):
+    def normalise_face(self, video_input, landmarks_input=None, window_size=7):
+
+        # Check if we should read from file
+        if isinstance(video_input, str):
+            video = skvideo.io.vread(video_input)
+        else:
+            video = video_input
 
         if window_size % 2 == 0:
             window_size += 1
 
-        video = skvideo.io.vread(video_file)
-        if landmarks_file is not None:
-            landmarks = self.parse_landmarks_file(landmarks_file)
+        # If we have landmarks
+        if landmarks_input is not None:
+            if isinstance(landmarks_input, str):
+                landmarks = self.parse_landmarks_file(landmarks_input)
+            else:
+                landmarks = landmarks_input
 
         if video.shape[0] < window_size or len(landmarks) == 0:
             return None
 
         trans = None
+        projected_landmarks = []
         for frame_no in range(0, video.shape[0]):
             if frame_no + window_size < video.shape[0]:
                 avg_stable_points = np.zeros([len(stablePntsIDs), 2])
                 for i in range(0, window_size):
-                    if landmarks_file is None:
+                    if landmarks_input is None:
                         avg_stable_points += self.fa.get_landmarks(video[frame_no + i])[0][stablePntsIDs, :]
                     else:
                         avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
@@ -62,7 +72,9 @@ class face_processor():
             else:
                 video[frame_no] = self.apply_transform(trans, video[frame_no])
 
-        return video
+            projected_landmarks.append(trans(landmarks[frame_no]))
+
+        return video, projected_landmarks
 
     @staticmethod
     def apply_transform(transform, img):

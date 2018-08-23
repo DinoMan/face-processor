@@ -14,7 +14,7 @@ def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, 
     while True:
         task = queue.get()
         if task is not None:
-            new_video = fp.normalise_face(files[task], landmarks[task], window_size=window_size)
+            new_video, projected_landmarks = fp.normalise_face(files[task], landmarks[task], window_size=window_size)
 
             if new_video is None:
                 queue.task_done()
