@@ -13,11 +13,14 @@ class face_processor():
         self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, enable_cuda=cuda, flip_input=False)
         self.ref_img = ref_img
         self.mean_face = None
-        if mean_face is not None and self.ref_img is None:
-            if isinstance(mean_face, str):
-                self.mean_face = np.load(mean_face)
+        if self.ref_img is None:
+            if mean_face is not None:
+                if isinstance(mean_face, str):
+                    self.mean_face = np.load(mean_face)
+                else:
+                    self.mean_face = mean_face
             else:
-                self.mean_face = mean_face
+                self.mean_face = np.load(os.path.split(__file__)[0] + "/data/mean_face.npy")
 
     def process_image(self, image):
         try:
