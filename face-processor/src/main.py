@@ -59,6 +59,7 @@ parser.add_argument("--append_extension", "-a", help="path to append after subje
 parser.add_argument("--picture", "-p", action='store_true', help="processes images", default=False)
 parser.add_argument("--reference", "-r", help="reference image")
 parser.add_argument("--workers", type=int, help="number of workers to use")
+parser.add_argument("--out_size", nargs='+', type=int, help="offsets the mean face")
 
 args = parser.parse_args()
 
@@ -99,7 +100,10 @@ if args.offset is not None:
     height_border += args.offset[1] + args.offset[2]
     width_border += 2 * args.offset[0]
 
-if args.reference is not None:
+if args.out_size is not None:
+    crop_height = args.out_size[0]
+    crop_width = args.out_size[1]
+elif args.reference is not None:
     reference = skimage.io.imread(args.reference)
     crop_height = reference.shape[0]
     crop_width = reference.shape[1]
@@ -159,20 +163,17 @@ if args.calculate_mean:
 bar = progressbar.ProgressBar(max_value=len(files)).start()
 rate = face_processor.get_frame_rate(files[0])
 
-if no_workers == 1:
-    process_video(0, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window)
-else:
-    workers = []
-    for i in range(no_workers):
-        queue.put(None)  # Place the poison pills for the workers
+workers = []
+for i in range(no_workers):
+    queue.put(None)  # Place the poison pills for the workers
 
-    for i in range(no_workers):
-        workers.append(mp.Process(target=process_video,
-                                  args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
+for i in range(no_workers):
+    workers.append(mp.Process(target=process_video,
+                              args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
 
-    for worker in workers:
-        worker.start()
+for worker in workers:
+    worker.start()
 
-    queue.join()
+queue.join()
 
 bar.finish()

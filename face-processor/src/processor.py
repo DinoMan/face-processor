@@ -11,11 +11,9 @@ stablePntsIDs = [33, 36, 39, 42, 45]
 class face_processor():
     def __init__(self, mean_face=None, ref_img=None, cuda=True):
         self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, enable_cuda=cuda, flip_input=False)
-
-        if ref_img is not None:
-            tmp_fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, enable_cuda=False, flip_input=False)
-            self.mean_face = tmp_fa.get_landmarks(ref_img)[0]
-        else:
+        self.ref_img = ref_img
+        self.mean_face = None
+        if mean_face is not None and self.ref_img is None:
             if isinstance(mean_face, str):
                 self.mean_face = np.load(mean_face)
             else:
@@ -27,12 +25,19 @@ class face_processor():
         except:
             return None
         stable_points = landmarks[stablePntsIDs, :]
+
+        if self.mean_face is None and self.ref_img is not None:
+            self.mean_face = self.fa.get_landmarks(self.ref_img)[0]
+
         warped_img, trans = self.warp_img(stable_points,
                                           self.mean_face[stablePntsIDs, :],
                                           image)
         return warped_img
 
     def normalise_face(self, video_input, landmarks_input=None, window_size=7):
+
+        if self.mean_face is None and self.ref_img is not None:
+            self.mean_face = self.fa.get_landmarks(self.ref_img)[0]
 
         # Check if we should read from file
         if isinstance(video_input, str):
@@ -49,18 +54,21 @@ class face_processor():
                 landmarks = self.parse_landmarks_file(landmarks_input)
             else:
                 landmarks = landmarks_input
+        else:
+            landmarks = []
 
-        if video.shape[0] < window_size or len(landmarks) == 0:
+        if video.shape[0] < window_size or (landmarks_input is not None and len(landmarks) == 0):
             return None
 
         trans = None
         projected_landmarks = []
         for frame_no in range(0, video.shape[0]):
-            if frame_no + window_size < video.shape[0]:
+            if frame_no + window_size <= video.shape[0]:
                 avg_stable_points = np.zeros([len(stablePntsIDs), 2])
                 for i in range(0, window_size):
                     if landmarks_input is None:
-                        avg_stable_points += self.fa.get_landmarks(video[frame_no + i])[0][stablePntsIDs, :]
+                        landmarks.append(self.fa.get_landmarks(video[frame_no + i])[0])
+                        avg_stable_points += landmarks[-1][stablePntsIDs, :]
                     else:
                         avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
 
@@ -70,6 +78,9 @@ class face_processor():
                                                        video[frame_no])
 
             else:
+                if landmarks_input is None:
+                    landmarks.append(self.fa.get_landmarks(video[frame_no])[0])
+
                 video[frame_no] = self.apply_transform(trans, video[frame_no])
 
             projected_landmarks.append(trans(landmarks[frame_no]))
