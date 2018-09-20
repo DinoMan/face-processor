@@ -1,6 +1,6 @@
 import argparse
 import os
-from processor import face_processor
+from face_processor import face_processor
 import numpy as np
 from skimage.viewer import ImageViewer
 import progressbar
