@@ -4,6 +4,7 @@ import skvideo.io
 import cv2
 import csv
 from skimage import transform as tf
+import os
 
 stablePntsIDs = [33, 36, 39, 42, 45]
 
@@ -22,11 +23,28 @@ class face_processor():
             else:
                 self.mean_face = np.load(os.path.split(__file__)[0] + "/data/mean_face.npy")
 
+    def get_transform(self, image):
+        try:
+            landmarks = self.fa.get_landmarks(image)[0]
+        except:
+            return None
+
+        stable_points = landmarks[stablePntsIDs, :]
+
+        if self.mean_face is None and self.ref_img is not None:
+            self.mean_face = self.fa.get_landmarks(self.ref_img)[0]
+
+        warped_img, trans = self.warp_img(stable_points,
+                                          self.mean_face[stablePntsIDs, :],
+                                          image)
+        return trans
+
     def process_image(self, image):
         try:
             landmarks = self.fa.get_landmarks(image)[0]
         except:
             return None
+
         stable_points = landmarks[stablePntsIDs, :]
 
         if self.mean_face is None and self.ref_img is not None:

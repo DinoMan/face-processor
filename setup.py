@@ -5,7 +5,7 @@ setup(name='face_processor',
       description='Aligns faces in videos and images',
       packages=['face_processor'],
       package_dir={'face_processor': 'face_processor'},
-      package_data={'syncnet': ['data/*.npy']},
+      package_data={'face_processor': ['data/*.npy']},
       install_requires=[
           'face_alignment',
           'scikit-video',
