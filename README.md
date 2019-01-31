@@ -1,5 +1,5 @@
 # face-processor
-The face processor provides the neccessary tools for aligning faces. It can be used to align faces in both images and videos (only one face per frame). It accepts landmark files or it csn use a landmark extractor to get the landmarks (this is slower). It requires the installation of this [face alignment library](https://github.com/1adrianb/face-alignment).
+The face processor provides the neccessary tools for aligning faces. It can be used to align faces in both images and videos (only one face per frame). It accepts landmark files or it can use a landmark extractor to get the landmarks (this is slower). It requires the installation of this [face alignment library](https://github.com/1adrianb/face-alignment).
 
 # Installing the face processor
 To install the face processor:
