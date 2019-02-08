@@ -7,10 +7,11 @@ setup(name='face_processor',
       package_dir={'face_processor': 'face_processor'},
       package_data={'face_processor': ['data/*.npy']},
       install_requires=[
-          'face_alignment',
+          'face-alignment',
           'scikit-video',
           'opencv-python',
-          'scikit-image'
+          'scikit-image', 
+          'progressbar'
       ],
       zip_safe=False)
 

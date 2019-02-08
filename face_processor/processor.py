@@ -11,7 +11,11 @@ stablePntsIDs = [33, 36, 39, 42, 45]
 
 class face_processor():
     def __init__(self, mean_face=None, ref_img=None, cuda=True):
-        self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, enable_cuda=cuda, flip_input=False)
+        if cuda:
+            device = 'cuda'
+        else:
+            device = 'cpu'
+        self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, device=device, flip_input=False)
         self.ref_img = ref_img
         self.mean_face = None
         if self.ref_img is None:
