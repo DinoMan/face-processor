@@ -14,7 +14,14 @@ def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, 
     while True:
         task = queue.get()
         if task is not None:
-            new_video, projected_landmarks = fp.normalise_face(files[task], landmarks[task], window_size=window_size)
+            try:
+                new_video, projected_landmarks = fp.normalise_face(files[task], landmarks[task],
+                                                                   window_size=window_size)
+            except Exception as e:
+                print("Exception Handled: ", e)
+                print(files[task])
+                queue.task_done()
+                continue
 
             if new_video is None:
                 queue.task_done()
@@ -45,6 +52,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--scale", type=float, help="the file extension for the video", default=1.0)
 parser.add_argument("--smoothing_window", "-w", type=int, help="The window to use for smoothing", default=7)
+parser.add_argument("--file_list", "-f", nargs='?', help="The file list")
 parser.add_argument("--offset", nargs='+', type=float, help="offsets the mean face")
 parser.add_argument("--input", "-i", help="folder containing input videos")
 parser.add_argument("--landmarks", "-l", help="folder containing landmarks")
@@ -56,7 +64,9 @@ parser.add_argument("--gpu", "-g", action='store_true', help="uses the gpu for f
 parser.add_argument("--visualise", "-v", nargs='?', help="visualises the landmarks")
 parser.add_argument("--ext_video", help="the file extension for the video")
 parser.add_argument("--append_extension", "-a", help="path to append after subject")
+parser.add_argument("--add_extension", action='store_true', help="appends extension to files", default=False)
 parser.add_argument("--picture", "-p", action='store_true', help="processes images", default=False)
+parser.add_argument("--append_folder", action='store_true', help="appends input folder to files", default=False)
 parser.add_argument("--reference", "-r", help="reference image")
 parser.add_argument("--workers", type=int, help="number of workers to use")
 parser.add_argument("--out_size", nargs='+', type=int, help="offsets the mean face")
@@ -114,7 +124,7 @@ else:
 
 print("Size will be W: " + str(crop_width) + " H: " + str(crop_height))
 
-fp = face_processor(cuda=args.gpu, mean_face=mean_face, ref_img=args.reference)
+fp = face_processor(cuda=args.gpu, mean_face=mean_face, ref_img=args.reference, img_size=(crop_height, crop_width))
 
 if args.picture:
     pictures = os.listdir(args.input)
@@ -128,9 +138,9 @@ if args.picture:
 
     exit()
 
-if args.subjects is None:
+if args.subjects is None and args.file_list is None:
     subject_folder_list = os.listdir(args.input)
-else:
+elif args.file_list is None:
     subject_folder_list = [str(s) for s in args.subjects]
 
 files = []
@@ -139,22 +149,43 @@ landmarks = []
 
 queue = mp.JoinableQueue()
 progress = 0
-for subject_folder in subject_folder_list:
-    if not os.path.exists(args.output + "/" + subject_folder):
-        os.makedirs(args.output + "/" + subject_folder)
-    for video_file in os.listdir(args.input + "/" + subject_folder + extension):
-        if args.ext_video is not None and not video_file.endswith(args.ext_video):
-            continue
+if args.file_list is None:
+    for subject_folder in subject_folder_list:
+        if not os.path.exists(args.output + "/" + subject_folder):
+            os.makedirs(args.output + "/" + subject_folder)
+        for video_file in os.listdir(args.input + "/" + subject_folder + extension):
+            if args.ext_video is not None and not video_file.endswith(args.ext_video):
+                continue
 
-        files.append(args.input + "/" + subject_folder + extension + video_file)
-        if args.landmarks is None:
-            landmarks.append(None)
-        else:
-            landmarks.append(args.landmarks + "/" + subject_folder + extension + swap_extension(video_file, ".csv"))
+            files.append(args.input + "/" + subject_folder + extension + video_file)
+            if args.landmarks is None:
+                landmarks.append(None)
+            else:
+                landmarks.append(args.landmarks + "/" + subject_folder + extension + swap_extension(video_file, ".csv"))
 
-        out_files.append(args.output + "/" + subject_folder + "/" + video_file)
-        queue.put(progress)
-        progress += 1
+            out_files.append(args.output + "/" + subject_folder + "/" + video_file)
+            queue.put(progress)
+            progress += 1
+else:
+    fh = open(args.file_list, "r")
+    files = fh.readlines()
+    added_ext = ""
+    if args.add_extension:
+        added_ext = args.ext_video
+    if args.append_folder:
+        files = [args.input + "/" + f.rstrip('\n') + added_ext for f in files]
+
+    for i, f in enumerate(files):
+        landmarks.append(f.replace(args.input, args.landmarks).replace(args.ext_video, ".csv"))
+
+        out_path = f.replace(args.input, args.output)
+        out_folder = os.path.dirname(os.path.abspath(out_path))
+        if not os.path.exists(out_folder):
+            os.makedirs(out_folder)
+        out_files.append(out_path)
+        queue.put(i)
+
+    fh.close()
 
 if args.calculate_mean:
     mean_face = fp.find_mean_face(files)
@@ -174,6 +205,10 @@ for i in range(no_workers):
 for worker in workers:
     worker.start()
 
-queue.join()
+try:
+    queue.join()
+except KeyboardInterrupt:
+    for worker in workers:
+        worker.terminate()
 
 bar.finish()

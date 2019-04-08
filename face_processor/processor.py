@@ -10,7 +10,7 @@ stablePntsIDs = [33, 36, 39, 42, 45]
 
 
 class face_processor():
-    def __init__(self, mean_face=None, ref_img=None, cuda=True):
+    def __init__(self, mean_face=None, ref_img=None, cuda=True, img_size=None):
         if cuda:
             device = 'cuda'
         else:
@@ -18,6 +18,7 @@ class face_processor():
         self.fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, device=device, flip_input=False)
         self.ref_img = ref_img
         self.mean_face = None
+        self.img_size = img_size
         if self.ref_img is None:
             if mean_face is not None:
                 if isinstance(mean_face, str):
@@ -30,7 +31,8 @@ class face_processor():
     def get_transform(self, image):
         try:
             landmarks = self.fa.get_landmarks(image)[0]
-        except:
+        except Exception as ex:
+            print(ex)
             return None
 
         stable_points = landmarks[stablePntsIDs, :]
@@ -56,7 +58,7 @@ class face_processor():
 
         warped_img, trans = self.warp_img(stable_points,
                                           self.mean_face[stablePntsIDs, :],
-                                          image)
+                                          image, output_shape=self.img_size)
         return warped_img
 
     def normalise_face(self, video_input, landmarks_input=None, window_size=7):
@@ -87,6 +89,12 @@ class face_processor():
 
         trans = None
         projected_landmarks = []
+        out_vid_size = list(video.shape)
+        if self.img_size is not None:
+            out_vid_size[1] = self.img_size[0]
+            out_vid_size[2] = self.img_size[1]
+
+        out_video = np.empty(out_vid_size)
         for frame_no in range(0, video.shape[0]):
             if frame_no + window_size <= video.shape[0]:
                 avg_stable_points = np.zeros([len(stablePntsIDs), 2])
@@ -98,31 +106,30 @@ class face_processor():
                         avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
 
                 avg_stable_points /= window_size
-                video[frame_no], trans = self.warp_img(avg_stable_points,
-                                                       self.mean_face[stablePntsIDs, :],
-                                                       video[frame_no])
-
+                out_video[frame_no], trans = self.warp_img(avg_stable_points,
+                                                           self.mean_face[stablePntsIDs, :],
+                                                           video[frame_no], output_shape=self.img_size)
             else:
                 if landmarks_input is None:
                     landmarks.append(self.fa.get_landmarks(video[frame_no])[0])
 
-                video[frame_no] = self.apply_transform(trans, video[frame_no])
+                out_video[frame_no] = self.apply_transform(trans, video[frame_no], output_shape=self.img_size)
 
             projected_landmarks.append(trans(landmarks[frame_no]))
 
-        return video, projected_landmarks
+        return out_video, projected_landmarks
 
     @staticmethod
-    def apply_transform(transform, img):
-        warped = tf.warp(img, inverse_map=transform.inverse)
+    def apply_transform(transform, img, output_shape=None):
+        warped = tf.warp(img, inverse_map=transform.inverse, output_shape=output_shape)
         warped = warped * 255  # note output from wrap is double image (value range [0,1])
         warped = warped.astype('uint8')
         return warped
 
     @staticmethod
-    def warp_img(src, dst, img):
+    def warp_img(src, dst, img, output_shape=None):
         tform = tf.estimate_transform('similarity', src, dst)  # find the transformation matrix
-        warped = tf.warp(img, inverse_map=tform.inverse)  # wrap the frame image
+        warped = tf.warp(img, inverse_map=tform.inverse, output_shape=output_shape)  # wrap the frame image
         warped = warped * 255  # note output from wrap is double image (value range [0,1])
         warped = warped.astype('uint8')
         return warped, tform
