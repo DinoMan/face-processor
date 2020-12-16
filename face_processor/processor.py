@@ -9,8 +9,8 @@ import os
 stablePntsIDs = [33, 36, 39, 42, 45]
 
 
-class face_processor():
-    def __init__(self, mean_face=None, ref_img=None, cuda=True, img_size=None):
+class FaceProcessor():
+    def __init__(self, mean_face=None, ref_img=None, cuda=True, img_size=None, fill_missing=False):
         if cuda:
             device = 'cuda'
         else:
@@ -19,6 +19,7 @@ class face_processor():
         self.ref_img = ref_img
         self.mean_face = None
         self.img_size = img_size
+        self.fill_missing = fill_missing
         if self.ref_img is None:
             if mean_face is not None:
                 if isinstance(mean_face, str):
@@ -78,7 +79,7 @@ class face_processor():
         # If we have landmarks
         if landmarks_input is not None:
             if isinstance(landmarks_input, str):
-                landmarks = self.parse_landmarks_file(landmarks_input)
+                landmarks = self.parse_landmarks_file(landmarks_input, self.fill_missing)
             else:
                 landmarks = landmarks_input
         else:
@@ -153,7 +154,7 @@ class face_processor():
 
     @staticmethod
     def get_width_height(points):
-        tl_corner, br_corner = face_processor.find_corners(points)
+        tl_corner, br_corner = FaceProcessor.find_corners(points)
 
         width = (br_corner - tl_corner)[0]
         height = (br_corner - tl_corner)[1]
@@ -172,26 +173,61 @@ class face_processor():
         return skvideo.io.ffprobe(video_file)["video"]["@r_frame_rate"]
 
     @staticmethod
-    def parse_landmarks_file(landmarks_file):
+    def parse_landmarks_file(landmarks_file, fill_missing=False):
         video_landmarks = []
-        with open(landmarks_file, 'rt', encoding="ascii") as csvfile:
-            csvreader = csv.reader(csvfile, delimiter=',')
+        ext = os.path.splitext(landmarks_file)[-1].lower()
+        if ext == ".csv":
+            with open(landmarks_file, 'rt', encoding="ascii") as csvfile:
+                csvreader = csv.reader(csvfile, delimiter=',')
 
-            for frame_no, landmarks in enumerate(csvreader):
-                frame_landmarks = np.zeros([68, 2])
-                for point in range(1, len(landmarks), 2):
-                    frame_landmarks[point // 2, 0] = int(landmarks[point + 1])
-                    frame_landmarks[point // 2, 1] = int(landmarks[point])
+                back_up = -np.ones([68, 2])
+                skipped_frames = 0
+                for frame_no, landmarks in enumerate(csvreader):
+                    frame_landmarks = back_up.copy()
+                    for point in range(1, len(landmarks), 2):
+                        frame_landmarks[point // 2, 0] = int(landmarks[point + 1])
+                        frame_landmarks[point // 2, 1] = int(landmarks[point])
 
-                    if int(landmarks[point]) == -1:
+                    if fill_missing:
+                        if np.any((frame_landmarks == -1)):  # If we have invalid values
+                            if np.all((back_up == -1)):  # If the backup is not available
+                                skipped_frames += 1  # Keep track of how many frames are missing and skip ahead
+                                continue
+                            else:  # If the backup is available then use it
+                                frame_landmarks = back_up.copy()
+                        else:
+                            if np.all((back_up == -1)):  # If the backup was not available
+                                video_landmarks = skipped_frames * [frame_landmarks] + video_landmarks
+                    elif np.any((frame_landmarks == -1)):
                         return []
-                video_landmarks.append(frame_landmarks)
+
+                    back_up = frame_landmarks.copy()  # Store the backup for future use
+                    video_landmarks.append(frame_landmarks)  # Append the frame landmarks to the video landmarks
+        else:
+            back_up = -np.ones([68, 2])
+            skipped_frames = 0
+            for frame_landmarks in np.load(landmarks_file):
+                if fill_missing:
+                    if np.any((frame_landmarks == -1)):
+                        if np.all((back_up == -1)):  # If the backup is not available
+                            skipped_frames += 1  # Keep track of how many frames are missing and skip ahead
+                            continue
+                        else:
+                            frame_landmarks = backup.copy()
+                    else:
+                        if np.all((back_up == -1)):  # If the backup was not available
+                            video_landmarks = skipped_frames * [frame_landmarks] + video_landmarks
+                elif np.any((frame_landmarks == -1)):
+                    return []
+
+                back_up = frame_landmarks.copy()  # Store the backup for future use
+                video_landmarks.append(frame_landmarks)  # Append the frame landmarks to the video landmarks
 
         return video_landmarks
 
     @staticmethod
     def offset_mean_face(mean_landmarks, offset_percentage=[0, 0]):
-        tl_corner, br_corner = face_processor.find_corners(mean_landmarks)
+        tl_corner, br_corner = FaceProcessor.find_corners(mean_landmarks)
 
         width = (br_corner - tl_corner)[0]
         height = (br_corner - tl_corner)[1]

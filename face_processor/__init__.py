@@ -1,1 +1,1 @@
-from .processor import face_processor
+from .processor import FaceProcessor

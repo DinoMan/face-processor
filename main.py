@@ -1,12 +1,23 @@
 import argparse
 import os
-from face_processor import face_processor
+from face_processor import FaceProcessor
 import numpy as np
 from skimage.viewer import ImageViewer
 import progressbar
 import skvideo.io
 import skimage.io
 import multiprocessing as mp
+
+
+def list_files(folder):
+    file_list = []
+    for root, dirs, files in os.walk(folder, topdown=False):
+        if not dirs and files:
+            for f in files:
+                file_path = os.path.join(root, f)
+                file_list.append(file_path)
+
+    return file_list
 
 
 def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, window_size):
@@ -57,16 +68,16 @@ parser.add_argument("--offset", nargs='+', type=float, help="offsets the mean fa
 parser.add_argument("--input", "-i", help="folder containing input videos")
 parser.add_argument("--landmarks", "-l", help="folder containing landmarks")
 parser.add_argument("--output", "-o", help="folder containing output videos")
-parser.add_argument("--subjects", "-s", nargs='+', help="the specific subjects to obtain")
 parser.add_argument("--mean", "-m", nargs='?', help="gets the mean face")
 parser.add_argument("--calculate_mean", "-c", action='store_true', help="gets the mean face", default=False)
 parser.add_argument("--gpu", "-g", action='store_true', help="uses the gpu for face alignment", default=False)
 parser.add_argument("--visualise", "-v", nargs='?', help="visualises the landmarks")
 parser.add_argument("--ext_video", help="the file extension for the video")
-parser.add_argument("--append_extension", "-a", help="path to append after subject")
+parser.add_argument("--ext_lmks", default=".csv", help="the file extension for the landmarks")
 parser.add_argument("--add_extension", action='store_true', help="appends extension to files", default=False)
 parser.add_argument("--picture", "-p", action='store_true', help="processes images", default=False)
 parser.add_argument("--append_folder", action='store_true', help="appends input folder to files", default=False)
+parser.add_argument("--fill_missing", action='store_true', help="fills in missing landmarks", default=False)
 parser.add_argument("--reference", "-r", help="reference image")
 parser.add_argument("--workers", type=int, help="number of workers to use")
 parser.add_argument("--out_size", nargs='+', type=int, help="offsets the mean face")
@@ -80,21 +91,16 @@ no_workers = mp.cpu_count()
 if args.workers is not None:
     no_workers = min(args.workers, mp.cpu_count())
 
-if args.append_extension is None:
-    extension = "/"
-else:
-    extension = "/" + args.append_extension + "/"
-
 if args.visualise is not None:
     mean_face = np.load(args.visualise)
 
     if args.offset is not None:
-        face_processor.offset_mean_face(mean_face, offset_percentage=args.offset[:2])
+        FaceProcessor.offset_mean_face(mean_face, offset_percentage=args.offset[:2])
 
-    tl_corner, br_corner = face_processor.find_corners(mean_face)
+    tl_corner, br_corner = FaceProcessor.find_corners(mean_face)
     canvas = np.zeros([br_corner[1], br_corner[0], 3]).astype(np.uint8)
 
-    face_processor.draw_points(canvas, mean_face, tag=True, in_place=True)
+    FaceProcessor.draw_points(canvas, mean_face, tag=True, in_place=True)
     viewer = ImageViewer(canvas)
     viewer.show()
     exit(0)
@@ -106,7 +112,7 @@ height_border = 0
 width_border = 0
 
 if args.offset is not None:
-    mean_face = face_processor.offset_mean_face(mean_face, offset_percentage=args.offset[:2])
+    mean_face = FaceProcessor.offset_mean_face(mean_face, offset_percentage=args.offset[:2])
     height_border += args.offset[1] + args.offset[2]
     width_border += 2 * args.offset[0]
 
@@ -118,13 +124,13 @@ elif args.reference is not None:
     crop_height = reference.shape[0]
     crop_width = reference.shape[1]
 else:
-    face_width, face_height = face_processor.get_width_height(mean_face)
+    face_width, face_height = FaceProcessor.get_width_height(mean_face)
     crop_height = int(face_height * (1 + height_border))
     crop_width = int(face_width * (1 + width_border))
 
 print("Size will be W: " + str(crop_width) + " H: " + str(crop_height))
 
-fp = face_processor(cuda=args.gpu, mean_face=mean_face, ref_img=args.reference, img_size=(crop_height, crop_width))
+fp = FaceProcessor(cuda=args.gpu, mean_face=mean_face, ref_img=args.reference, img_size=(crop_height, crop_width), fill_missing=args.fill_missing)
 
 if args.picture:
     pictures = os.listdir(args.input)
@@ -138,61 +144,43 @@ if args.picture:
 
     exit()
 
-if args.subjects is None and args.file_list is None:
-    subject_folder_list = os.listdir(args.input)
-elif args.file_list is None:
-    subject_folder_list = [str(s) for s in args.subjects]
-
 files = []
 out_files = []
 landmarks = []
 
 queue = mp.JoinableQueue()
 progress = 0
+
+files = []
 if args.file_list is None:
-    for subject_folder in subject_folder_list:
-        if not os.path.exists(args.output + "/" + subject_folder):
-            os.makedirs(args.output + "/" + subject_folder)
-        for video_file in os.listdir(args.input + "/" + subject_folder + extension):
-            if args.ext_video is not None and not video_file.endswith(args.ext_video):
-                continue
-
-            files.append(args.input + "/" + subject_folder + extension + video_file)
-            if args.landmarks is None:
-                landmarks.append(None)
-            else:
-                landmarks.append(args.landmarks + "/" + subject_folder + extension + swap_extension(video_file, ".csv"))
-
-            out_files.append(args.output + "/" + subject_folder + "/" + video_file)
-            queue.put(progress)
-            progress += 1
+    files = list_files(args.input)
 else:
     fh = open(args.file_list, "r")
     files = fh.readlines()
+    fh.close()
     added_ext = ""
     if args.add_extension:
         added_ext = args.ext_video
     if args.append_folder:
         files = [args.input + "/" + f.rstrip('\n') + added_ext for f in files]
 
-    for i, f in enumerate(files):
-        landmarks.append(f.replace(args.input, args.landmarks).replace(args.ext_video, ".csv"))
+for i, f in enumerate(files):
+    ext = os.path.splitext(f)[-1]
+    landmarks.append(f.replace(args.input, args.landmarks).replace(ext, args.ext_lmks))
 
-        out_path = f.replace(args.input, args.output)
-        out_folder = os.path.dirname(os.path.abspath(out_path))
-        if not os.path.exists(out_folder):
-            os.makedirs(out_folder)
-        out_files.append(out_path)
-        queue.put(i)
-
-    fh.close()
+    out_path = f.replace(args.input, args.output)
+    out_folder = os.path.dirname(os.path.abspath(out_path))
+    if not os.path.exists(out_folder):
+        os.makedirs(out_folder)
+    out_files.append(out_path)
+    queue.put(i)
 
 if args.calculate_mean:
     mean_face = fp.find_mean_face(files)
     np.save("mean_face.npy", mean_face)
 
 bar = progressbar.ProgressBar(max_value=len(files)).start()
-rate = face_processor.get_frame_rate(files[0])
+rate = FaceProcessor.get_frame_rate(files[0])
 
 workers = []
 for i in range(no_workers):
