@@ -104,6 +104,9 @@ class FaceProcessor():
                         landmarks.append(self.fa.get_landmarks(video[frame_no + i])[0])
                         avg_stable_points += landmarks[-1][stablePntsIDs, :]
                     else:
+                        if frame_no + i >= len(landmarks):
+                            landmarks.append(landmarks[-1])
+
                         avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
 
                 avg_stable_points /= window_size

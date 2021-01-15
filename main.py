@@ -20,14 +20,16 @@ def list_files(folder):
     return file_list
 
 
-def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, window_size):
+def process_video(worker_no, fp, bar, files, landmarks, out_files, queue, rate, window_size, stabilities, mean_stab):
     # Worker loop
+    win_size = window_size
     while True:
         task = queue.get()
         if task is not None:
+            if stabilities is not None:
+                win_size = int(max(window_size * (1 / (1 + np.exp(-(mean_stab - stabilities[task])))), 1))
             try:
-                new_video, projected_landmarks = fp.normalise_face(files[task], landmarks[task],
-                                                                   window_size=window_size)
+                new_video, projected_landmarks = fp.normalise_face(files[task], landmarks[task], window_size=win_size)
             except Exception as e:
                 print("Exception Handled: ", e)
                 print(files[task])
@@ -64,6 +66,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--scale", type=float, help="the file extension for the video", default=1.0)
 parser.add_argument("--smoothing_window", "-w", type=int, help="The window to use for smoothing", default=7)
 parser.add_argument("--file_list", "-f", nargs='?', help="The file list")
+parser.add_argument("--stability", type=float, help="file list also has stability metric")
 parser.add_argument("--offset", nargs='+', type=float, help="offsets the mean face")
 parser.add_argument("--input", "-i", help="folder containing input videos")
 parser.add_argument("--landmarks", "-l", help="folder containing landmarks")
@@ -152,11 +155,21 @@ queue = mp.JoinableQueue()
 progress = 0
 
 files = []
+
+stabilities = None
 if args.file_list is None:
     files = list_files(args.input)
 else:
     fh = open(args.file_list, "r")
-    files = fh.readlines()
+    if args.stability is not None:
+        files = []
+        stabilities = []
+        for f in fh.readlines():
+            fn, stab = f.split(",")
+            files.append(fn)
+            stabilities.append(float(stab))
+    else:
+        files = fh.readlines()
     fh.close()
     added_ext = ""
     if args.add_extension:
@@ -168,7 +181,7 @@ for i, f in enumerate(files):
     ext = os.path.splitext(f)[-1]
     landmarks.append(f.replace(args.input, args.landmarks).replace(ext, args.ext_lmks))
 
-    out_path = f.replace(args.input, args.output)
+    out_path = f.replace(args.input, args.output + "/")
     out_folder = os.path.dirname(os.path.abspath(out_path))
     if not os.path.exists(out_folder):
         os.makedirs(out_folder)
@@ -188,7 +201,7 @@ for i in range(no_workers):
 
 for i in range(no_workers):
     workers.append(mp.Process(target=process_video,
-                              args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window))))
+                              args=((i, fp, bar, files, landmarks, out_files, queue, rate, args.smoothing_window, stabilities, args.stability))))
 
 for worker in workers:
     worker.start()
