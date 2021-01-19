@@ -84,11 +84,16 @@ class FaceProcessor():
                 landmarks = landmarks_input
         else:
             landmarks = []
+            for frame_no in range(0, video.shape[0]):
+                detected_lmks = self.fa.get_landmarks(video[frame_no + i])
+                if detected_lmks:
+                    landmarks.append(detected_lmks[0])
+                else:
+                    landmarks.append(-np.ones([68, 2]))
 
         if video.shape[0] < window_size or (landmarks_input is not None and len(landmarks) == 0):
             return None
 
-        trans = None
         projected_landmarks = []
         out_vid_size = list(video.shape)
         if self.img_size is not None:
@@ -97,27 +102,20 @@ class FaceProcessor():
 
         out_video = np.empty(out_vid_size)
         for frame_no in range(0, video.shape[0]):
-            if frame_no + window_size <= video.shape[0]:
-                avg_stable_points = np.zeros([len(stablePntsIDs), 2])
-                for i in range(0, window_size):
-                    if landmarks_input is None:
-                        landmarks.append(self.fa.get_landmarks(video[frame_no + i])[0])
-                        avg_stable_points += landmarks[-1][stablePntsIDs, :]
-                    else:
-                        if frame_no + i >= len(landmarks):
-                            landmarks.append(landmarks[-1])
+            avg_stable_points = np.zeros([len(stablePntsIDs), 2])
+            averaged_frames = 0
+            for i in range(-window_size // 2, window_size // 2 + 1):
+                if frame_no + i >= len(landmarks):
+                    break
+                elif frame_no + i < 0:
+                    continue
+                averaged_frames += 1
 
-                        avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
+                avg_stable_points += landmarks[frame_no + i][stablePntsIDs, :]
 
-                avg_stable_points /= window_size
-                out_video[frame_no], trans = self.warp_img(avg_stable_points,
-                                                           self.mean_face[stablePntsIDs, :],
-                                                           video[frame_no], output_shape=self.img_size)
-            else:
-                if landmarks_input is None:
-                    landmarks.append(self.fa.get_landmarks(video[frame_no])[0])
-
-                out_video[frame_no] = self.apply_transform(trans, video[frame_no], output_shape=self.img_size)
+            avg_stable_points /= averaged_frames
+            out_video[frame_no], trans = self.warp_img(avg_stable_points, self.mean_face[stablePntsIDs, :],
+                                                       video[frame_no], output_shape=self.img_size)
 
             projected_landmarks.append(trans(landmarks[frame_no]))
 
